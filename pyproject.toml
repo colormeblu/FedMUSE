@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fedsvp"
+name = "fedmuse"
 version = "0.1.0"
-description = "Runnable research scaffold for FedSVP on PACS (with FedAvg baseline)"
+description = "Runnable research scaffold for Fed-MUSE (SGDH + HD-SPT + UA-TTAF)"
 requires-python = ">=3.9,<3.10"
 
 [tool.setuptools]

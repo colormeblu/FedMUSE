@@ -19,14 +19,14 @@ if _SRC.exists() and str(_SRC) not in sys.path:
 
 import numpy as np
 
-from fedsvp.utils.seed import set_seed
-from fedsvp.utils.io import ensure_dir, load_json, save_json, save_csv, flatten_dict
-from fedsvp.data.protocols import apply_federated_protocol, build_partition_report
+from fedmuse.utils.seed import set_seed
+from fedmuse.utils.io import ensure_dir, load_json, save_json, save_csv, flatten_dict
+from fedmuse.data.protocols import apply_federated_protocol, build_partition_report
 
 # Ensure registries are populated
-import fedsvp.data  # noqa: F401
-import fedsvp.algorithms  # noqa: F401
-from fedsvp.registry import get_dataset, get_algorithm, list_algorithms, list_datasets
+import fedmuse.data  # noqa: F401
+import fedmuse.algorithms  # noqa: F401
+from fedmuse.registry import get_dataset, get_algorithm, list_algorithms, list_datasets
 
 def _set_by_dotted_key(d: Dict[str, Any], key: str, value: Any) -> None:
     parts = key.split(".")

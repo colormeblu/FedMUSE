@@ -1,0 +1,51 @@
+{
+  "base_config": "configs/pacs_fedmuse.json",
+  "experiment_name": "pacs_fedmuse_loo_ablation",
+  "outdir": "outputs",
+  "grid": {
+    "seed": [0, 42],
+    "dataset.target_domain": ["art", "cartoon", "photo", "sketch"]
+  },
+  "ablations": {
+    "baseline_fedprompt": {
+      "algorithm.prompt_layers": 1,
+      "algorithm.lambda_sem": 0.0,
+      "algorithm.lambda_orth": 0.0,
+      "algorithm.use_semantic_hallucination": false,
+      "algorithm.use_orth_loss": false,
+      "algorithm.use_ua_ttaf": false
+    },
+    "variant_a_sgdh": {
+      "algorithm.prompt_layers": 4,
+      "algorithm.lambda_sem": 0.5,
+      "algorithm.lambda_orth": 0.0,
+      "algorithm.use_semantic_hallucination": true,
+      "algorithm.use_orth_loss": false,
+      "algorithm.use_ua_ttaf": false
+    },
+    "variant_b_hdspt": {
+      "algorithm.prompt_layers": 4,
+      "algorithm.lambda_sem": 0.0,
+      "algorithm.lambda_orth": 0.1,
+      "algorithm.use_semantic_hallucination": false,
+      "algorithm.use_orth_loss": true,
+      "algorithm.use_ua_ttaf": false
+    },
+    "variant_c_ua_ttaf": {
+      "algorithm.prompt_layers": 1,
+      "algorithm.lambda_sem": 0.0,
+      "algorithm.lambda_orth": 0.0,
+      "algorithm.use_semantic_hallucination": false,
+      "algorithm.use_orth_loss": false,
+      "algorithm.use_ua_ttaf": true
+    },
+    "fedmuse_full": {
+      "algorithm.prompt_layers": 4,
+      "algorithm.lambda_sem": 0.5,
+      "algorithm.lambda_orth": 0.1,
+      "algorithm.use_semantic_hallucination": true,
+      "algorithm.use_orth_loss": true,
+      "algorithm.use_ua_ttaf": true
+    }
+  }
+}

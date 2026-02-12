@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "FedSVP: Federated Causal Prompt Learning (PACS scaffold)"
+title: "FedMUSE: Federated Causal Prompt Learning (PACS scaffold)"
 message: "If you use this code in your research, please cite your paper and this repository."
 type: software
 authors:

@@ -1,0 +1,95 @@
+{
+  "summary": {
+    "dataset": "domainnet",
+    "target_domain": "clipart",
+    "algorithm": "fedmuse",
+    "seed": 42,
+    "final_acc": 0.7358548522515512,
+    "final_acc_std": 0.0,
+    "seconds": 3762.2680172920227,
+    "hp.dataset.name": "domainnet",
+    "hp.dataset.root": "/home/dengyu/dataset",
+    "hp.dataset.protocol": "loo",
+    "hp.dataset.target_domain": "clipart",
+    "hp.dataset.val_ratio": 0.1,
+    "hp.dataset.image_size": 224,
+    "hp.dataset.transforms": "clip",
+    "hp.algorithm.name": "fedmuse",
+    "hp.algorithm.rounds": 50,
+    "hp.algorithm.local_epochs": 1,
+    "hp.algorithm.batch_size": 32,
+    "hp.algorithm.optimizer": "adamw",
+    "hp.algorithm.lr": 0.0001,
+    "hp.algorithm.wd": 0.0001,
+    "hp.algorithm.prompt_len": 5,
+    "hp.algorithm.prompt_layers": 4,
+    "hp.algorithm.prompt_start_layer": null,
+    "hp.algorithm.lambda_sem": 0.5,
+    "hp.algorithm.lambda_orth": 0.1,
+    "hp.algorithm.use_semantic_hallucination": true,
+    "hp.algorithm.use_orth_loss": true,
+    "hp.algorithm.use_ua_ttaf": true,
+    "hp.algorithm.beta_uncertainty": 1.0,
+    "hp.algorithm.gamma_uncertainty": 0.0,
+    "hp.algorithm.style_mapper_hidden": 1024,
+    "hp.algorithm.router_hidden": 256,
+    "hp.algorithm.router_steps": 100,
+    "hp.algorithm.router_lr": 0.001,
+    "hp.algorithm.stat_max_batches": 192,
+    "hp.algorithm.class_template": "a photo of a {}",
+    "hp.algorithm.style_templates": [
+      "a photo in the style of {domain}",
+      "an image from {domain} domain"
+    ],
+    "hp.algorithm.log_every": 1,
+    "hp.algorithm.tqdm": true
+  },
+  "raw": {
+    "history": {
+      "round": [
+        1
+      ],
+      "test_acc": [
+        0.7358548522515512
+      ],
+      "test_loss": [
+        1.125075949343487
+      ],
+      "train_ce_loss": [
+        2.0462770248082505
+      ],
+      "train_sem_loss": [
+        0.0007495996675913633
+      ],
+      "train_orth_loss": [
+        0.008008559608541875
+      ],
+      "train_total_loss": [
+        2.0474526814371052
+      ],
+      "agg_weights": [
+        [
+          0.09722918845376735,
+          0.13845529033109624,
+          0.3152572316252246,
+          0.3204231858748515,
+          0.12863510371506026
+        ]
+      ],
+      "mean_alpha": [
+        0.7175522454932338
+      ],
+      "router_loss": [
+        0.000521143723744899
+      ],
+      "client_names": [
+        "infograph",
+        "painting",
+        "quickdraw",
+        "real",
+        "sketch"
+      ]
+    },
+    "final_acc": 0.7358548522515512
+  }
+}

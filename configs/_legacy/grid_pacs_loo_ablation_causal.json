@@ -1,7 +1,7 @@
 {
   "experiment_name": "pacs_causalprompt_loo_ablation",
   "outdir": "outputs",
-  "base_config": "configs/pacs_fedsvp.json",
+  "base_config": "configs/pacs_fedmuse.json",
   "grid": {
     "seed": [42,0],
     "dataset.target_domain": ["art", "cartoon", "photo", "sketch"]

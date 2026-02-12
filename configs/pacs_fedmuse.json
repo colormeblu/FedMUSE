@@ -1,0 +1,55 @@
+{
+  "experiment": {
+    "name": "pacs_fedmuse",
+    "outdir": "outputs"
+  },
+  "seed": 42,
+  "num_workers": 4,
+  "dataset": {
+    "name": "pacs",
+    "root": "/home/dengyu/dataset",
+    "protocol": "loo",
+    "target_domain": "sketch",
+    "val_ratio": 0.1,
+    "image_size": 224,
+    "transforms": "clip"
+  },
+  "algorithm": {
+    "name": "fedmuse",
+    "rounds": 50,
+    "local_epochs": 1,
+    "batch_size": 32,
+    "optimizer": "adamw",
+    "lr": 0.0001,
+    "wd": 0.0001,
+    "prompt_len": 4,
+    "prompt_layers": 4,
+    "prompt_start_layer": null,
+    "lambda_sem": 0.5,
+    "lambda_orth": 0.1,
+    "use_semantic_hallucination": true,
+    "use_orth_loss": true,
+    "use_ua_ttaf": true,
+    "beta_uncertainty": 1.0,
+    "gamma_uncertainty": 0.0,
+    "style_mapper_hidden": 1024,
+    "router_hidden": 256,
+    "router_steps": 100,
+    "router_lr": 0.001,
+    "stat_max_batches": -1,
+    "class_template": "a photo of a {}",
+    "style_templates": [
+      "a photo in the style of {domain}",
+      "an image from {domain} domain"
+    ],
+    "log_every": 1,
+    "tqdm": true
+  },
+  "model": {
+    "backbone": "open_clip",
+    "open_clip": {
+      "name": "ViT-B-16",
+      "pretrained": "openai"
+    }
+  }
+}

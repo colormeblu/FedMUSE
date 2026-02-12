@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from fedsvp.algorithms.agg import weighted_average_state_dict
+from fedmuse.algorithms.agg import aggregate_class_prototypes, weighted_average_state_dict
 
 
 class WeightedAverageStateDictTests(unittest.TestCase):
@@ -77,6 +77,50 @@ class WeightedAverageStateDictTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, r"state_dict keys mismatch at index 1"):
             weighted_average_state_dict(states, [0.4, 0.6])
+
+
+class AggregateClassPrototypeTests(unittest.TestCase):
+    def test_weighted_classwise_average_without_normalization(self):
+        protos = [
+            torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+            torch.tensor([[0.0, 1.0], [1.0, 0.0]], dtype=torch.float32),
+        ]
+        counts = [
+            torch.tensor([2, 0], dtype=torch.long),
+            torch.tensor([2, 3], dtype=torch.long),
+        ]
+        out, mask = aggregate_class_prototypes(protos, counts, normalize=False)
+
+        expected = torch.tensor([[0.5, 0.5], [1.0, 0.0]], dtype=torch.float32)
+        self.assertTrue(torch.allclose(out, expected, atol=1e-6))
+        self.assertTrue(torch.equal(mask, torch.tensor([True, True])))
+
+    def test_missing_class_returns_zero_vector_and_false_mask(self):
+        protos = [
+            torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+            torch.tensor([[0.0, 1.0], [1.0, 0.0]], dtype=torch.float32),
+        ]
+        counts = [
+            torch.tensor([2, 0], dtype=torch.long),
+            torch.tensor([2, 0], dtype=torch.long),
+        ]
+        out, mask = aggregate_class_prototypes(protos, counts, normalize=True)
+
+        self.assertTrue(torch.allclose(out[0], torch.tensor([0.70710677, 0.70710677]), atol=1e-6))
+        self.assertTrue(torch.allclose(out[1], torch.zeros(2), atol=1e-6))
+        self.assertTrue(torch.equal(mask, torch.tensor([True, False])))
+
+    def test_shape_mismatch_raises(self):
+        protos = [
+            torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+            torch.tensor([[1.0, 0.0]], dtype=torch.float32),
+        ]
+        counts = [
+            torch.tensor([1, 1], dtype=torch.long),
+            torch.tensor([1], dtype=torch.long),
+        ]
+        with self.assertRaisesRegex(ValueError, r"Prototype shape mismatch"):
+            aggregate_class_prototypes(protos, counts)
 
 
 if __name__ == "__main__":

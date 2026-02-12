@@ -2,5 +2,5 @@ torch==1.9
 torchvision==0.10.0
 numpy==1.22
 tqdm==4.63.0
-scikit_learn==1.2.2
+scikit-learn==1.2.2
 open_clip_torch==2.0.0

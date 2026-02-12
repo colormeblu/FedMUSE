@@ -1,105 +1,84 @@
-# FedSVP
+# Fed-MUSE
 
-FedSVP is a runnable Python project for the algorithm described in `毕业论文算法一.docx`:
+`Fed-MUSE` is a runnable Python project for the algorithm in `/home/dengyu/Fed-MUSE.docx`, with the same scaffold style as `FedSVP`:
 
-- **Fed-MSVP (client side)**: multi-scale visual prompts across ViT layers with adaptive gates (`alpha_l`, initialized to 0).
-- **Fed-SDWA (server side)**: semantic-distance weighted aggregation based on proxy-data semantic scores.
+- `train.py`
+- `configs/*.json`
+- `src/fedmuse/...`
+- `tests/...`
 
-The project keeps the same scaffold style as `fedcausal_prompt_project`:
-`train.py + configs + src/<package> + tests`.
+Implemented modules:
 
-## 1) Install
+- `SGDH` (Semantic-Guided Domain Hallucination): text-style embeddings -> style statistics -> AdaIN feature hallucination + KL semantic consistency.
+- `HD-SPT` (Hierarchical Dual-Stream Prompt Tuning): shared/global prompts and local/expert prompts with orthogonal disentanglement.
+- `UA-TTAF` (Uncertainty-Aware Test-Time Adaptive Fusion): Mahalanobis expert matching + router prior + entropy gate for dynamic prompt fusion.
 
-Use **Python 3.9** (required by `torch==1.9` in this project).
+## Install
+
+Use Python 3.9 as specified in `pyproject.toml` and `requirements.txt`.
 
 ```bash
-cd /home/dengyu/FedSVP
+cd /home/dengyu/Fed-MUSE
 pip install -r requirements.txt
 pip install -e .
 ```
 
-## 2) Quick Start
+## Quick Start
 
-List datasets and algorithms:
+List available datasets and algorithms:
 
 ```bash
 python train.py --list
 ```
 
-Single run (PACS, target=sketch):
+Single run:
 
 ```bash
-python train.py --config configs/pacs_fedsvp.json \
-  --set dataset.root=/path/to/data
+python train.py --config configs/pacs_fedmuse.json \
+  --set dataset.root=/path/to/data \
+  --set dataset.target_domain=sketch
 ```
 
-Run LODO on all targets in one command:
+LODO over all targets:
 
 ```bash
-python train.py --config configs/pacs_fedsvp.json \
+python train.py --config configs/pacs_fedmuse.json \
   --set dataset.root=/path/to/data \
   --set dataset.target_domain=ALL
 ```
 
-## 3) Core Mapping to the Thesis
+## Module Mapping
 
-### Fed-MSVP
+- Model and prompt definition:
+  - `src/fedmuse/models/fedmuse_clip.py`
+- Training losses and SGDH/UA-TTAF core functions:
+  - `src/fedmuse/algorithms/fedmuse_train.py`
+- Federated runner (client training + server aggregation + test-time fusion):
+  - `src/fedmuse/algorithms/runners.py`
 
-- `src/fedsvp/models/fedsvp_clip.py`
-- `MultiScaleVisualPrompt`
-  - Shallow prompts: layers `0-3`
-  - Middle prompts: layers `4-8`
-  - Deep prompts: layers `9-11`
-- `alpha_l` gate per layer, initialized to `0`
-- local loss in `src/fedsvp/algorithms/fedsvp_train.py`:
-  - `L_local = CE + lambda_consistency * (1 - cosine(f_prompt, f_frozen))`
+## Configs
 
-### Fed-SDWA
+- Fed-MUSE:
+  - `configs/pacs_fedmuse.json`
+  - `configs/office_fedmuse.json`
+  - `configs/domainnet_fedmuse.json`
+- Baseline FedAvg:
+  - `configs/pacs_fedavg.json`
+  - `configs/office_fedavg.json`
+  - `configs/domainnet_fedavg.json`
+- Ablation grid:
+  - `configs/grid_pacs_loo_ablation_fedmuse.json`
 
-- semantic anchor construction from class names and templates
-- proxy-data scoring per client:
-  - `S_k = mean_i max_c cosine(v_k,i, z_anchor,c)`
-- semantic softmax weights:
-  - `w_k = softmax(S_k / tau)`
-- weighted prompt aggregation on server
-
-Implementation files:
-
-- `src/fedsvp/algorithms/runners.py`
-- `src/fedsvp/algorithms/agg.py`
-
-## 4) Configs
-
-FedSVP configs:
-
-- `configs/pacs_fedsvp.json`
-- `configs/office_fedsvp.json`
-- `configs/domainnet_fedsvp.json`
-
-Baseline configs:
-
-- `configs/pacs_fedavg.json`
-- `configs/office_fedavg.json`
-- `configs/domainnet_fedavg.json`
-
-Ablation grid (matching the thesis table logic):
-
-- `configs/grid_pacs_loo_ablation_fedsvp.json`
-  - `standard_prompt_fedavg`
-  - `msvp_only`
-  - `sdwa_only`
-  - `fedsvp_full`
-
-Run grid:
+Run ablation:
 
 ```bash
-python train.py --grid configs/grid_pacs_loo_ablation_fedsvp.json \
+python train.py --grid configs/grid_pacs_loo_ablation_fedmuse.json \
   --set dataset.root=/path/to/data
 ```
 
-## 5) Dataset Layout
+## Dataset Layout
 
-### PACS
+PACS:
 
 ```text
 <DATA_ROOT>/PACS/
@@ -109,7 +88,7 @@ python train.py --grid configs/grid_pacs_loo_ablation_fedsvp.json \
   sketch/<class>/*.jpg
 ```
 
-### Office-Home
+Office-Home:
 
 ```text
 <DATA_ROOT>/OfficeHome/
@@ -119,7 +98,7 @@ python train.py --grid configs/grid_pacs_loo_ablation_fedsvp.json \
   RealWorld/<class>/*.jpg
 ```
 
-### DomainNet
+DomainNet:
 
 ```text
 <DATA_ROOT>/DomainNet/
@@ -129,19 +108,4 @@ python train.py --grid configs/grid_pacs_loo_ablation_fedsvp.json \
   quickdraw/<class>/*
   real/<class>/*
   sketch/<class>/*
-```
-
-## 6) Project Layout
-
-```text
-FedSVP/
-├── configs/
-├── src/fedsvp/
-│   ├── algorithms/
-│   ├── data/
-│   ├── models/
-│   ├── utils/
-│   └── registry.py
-├── tests/
-└── train.py
 ```

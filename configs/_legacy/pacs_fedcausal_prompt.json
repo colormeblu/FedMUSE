@@ -1,6 +1,6 @@
 {
   "experiment": {
-    "name": "pacs_fedsvp",
+    "name": "pacs_fedmuse",
     "outdir": "outputs"
   },
   "seed": 42,
@@ -14,7 +14,7 @@
     "image_size": 224
   },
   "algorithm": {
-    "name": "fedsvp",
+    "name": "fedmuse",
     "rounds": 30,
     "local_epochs": 1,
     "batch_size": 32,
