@@ -47,6 +47,22 @@ python train.py --config configs/pacs_fedmuse.json \
   --set dataset.target_domain=ALL
 ```
 
+Multi-GPU (DDP):
+
+```bash
+torchrun --nproc_per_node=2 train.py --config configs/domainnet_fedmuse.json \
+  --set dataset.root=/path/to/data \
+  --set parallel_mode=ddp \
+  --set multi_gpu=true \
+  --set gpu_ids=[0,1]
+```
+
+Notes:
+- DDP requires `torchrun`; do not use plain `python train.py` for multi-GPU.
+- `multi_gpu=true` with empty `gpu_ids` uses all visible CUDA devices.
+- You can set explicit devices, e.g. `gpu_ids=[1,2,3]`, and then use `--nproc_per_node=3`.
+- Keep `device` unset (or set it to `cuda`) unless you need a specific single-GPU run.
+
 ## Module Mapping
 
 - Model and prompt definition:

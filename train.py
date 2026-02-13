@@ -21,6 +21,14 @@ import numpy as np
 
 from fedmuse.utils.seed import set_seed
 from fedmuse.utils.io import ensure_dir, load_json, save_json, save_csv, flatten_dict
+from fedmuse.utils.distributed import (
+    broadcast_object,
+    cleanup_distributed,
+    get_rank,
+    is_distributed,
+    is_main_process,
+    setup_distributed_from_cfg,
+)
 from fedmuse.data.protocols import apply_federated_protocol, build_partition_report
 
 # Ensure registries are populated
@@ -57,7 +65,7 @@ def apply_overrides(cfg: Dict[str, Any], overrides: List[str]) -> Dict[str, Any]
 
 def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
     seed = int(cfg.get("seed", 0))
-    set_seed(seed)
+    set_seed(seed + int(get_rank()))
 
     ds_cfg = cfg.get("dataset", {})
     algo_cfg = cfg.get("algorithm", {})
@@ -102,9 +110,12 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
     name = exp.get("name", f"{dataset_name}_{algo_name}")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     run_id = f"{name}__target={'ALL' if run_all_targets else ds_cfg['target_domain']}__seed={seed}__{stamp}"
+    if is_distributed():
+        run_id = str(broadcast_object(run_id if is_main_process() else None, src=0))
     outdir = ensure_dir(outdir_root / run_id)
 
-    save_json(cfg, outdir / "config.json")
+    if is_main_process():
+        save_json(cfg, outdir / "config.json")
 
     def _run_one_target(tgt: str, outdir_t: Path) -> Tuple[Dict[str, Any], float]:
         cfg_t = copy.deepcopy(cfg)
@@ -116,7 +127,8 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
         # Persist client partition summary for reproducibility / ablations.
         part = build_partition_report(domains_t, base_domains, cfg_t["dataset"], seed=seed)
-        save_json(part, outdir_t / "partition.json")
+        if is_main_process():
+            save_json(part, outdir_t / "partition.json")
 
         # Initialize live outputs so files exist before training starts.
         init_history = {"round": [], "test_acc": [], "test_loss": []}
@@ -130,13 +142,15 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "seconds": 0.0,
             **{f"hp.{k}": v for k, v in flatten_dict({"dataset": cfg_t.get("dataset", {}), "algorithm": cfg_t.get("algorithm", {})}).items()},
         }
-        save_json(init_history, outdir_t / "history.json")
-        save_json({"summary": summary_base, "raw": {"history": init_history, "final_acc": float("nan")}}, outdir_t / "result.json")
+        if is_main_process():
+            save_json(init_history, outdir_t / "history.json")
+            save_json({"summary": summary_base, "raw": {"history": init_history, "final_acc": float("nan")}}, outdir_t / "result.json")
         cfg_t.setdefault("_runtime", {})
         cfg_t["_runtime"]["outdir"] = str(outdir_t)
         cfg_t["_runtime"]["summary"] = summary_base
 
-        print(f"==> Running: dataset={dataset_name}, target={tgt}, algo={algo_name}")
+        if is_main_process():
+            print(f"==> Running: dataset={dataset_name}, target={tgt}, algo={algo_name}")
         t0 = time.time()
         res = runner.run(cfg_t, domains_t)
         dt = time.time() - t0
@@ -151,9 +165,10 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
             sub = ensure_dir(Path(outdir) / "targets" / f"target={tgt}")
             res, dt = _run_one_target(tgt, sub)
             total_t += dt
-            if isinstance(res, dict) and "history" in res:
-                save_json(res["history"], sub / "history.json")
-            save_json(res, sub / "result_raw.json")
+            if is_main_process():
+                if isinstance(res, dict) and "history" in res:
+                    save_json(res["history"], sub / "history.json")
+                save_json(res, sub / "result_raw.json")
             acc = float(res.get("final_acc", np.nan))
             accs.append(acc)
             per_target[tgt] = {"final_acc": acc, "seconds": dt}
@@ -167,7 +182,7 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
         result, dt = _run_one_target(ds_cfg["target_domain"], outdir)
 
     # save history if present
-    if isinstance(result, dict) and "history" in result:
+    if is_main_process() and isinstance(result, dict) and "history" in result:
         save_json(result["history"], outdir / "history.json")
 
     summary = {
@@ -180,7 +195,8 @@ def run_single(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "seconds": dt,
         **{f"hp.{k}": v for k, v in flatten_dict({"dataset": ds_cfg, "algorithm": algo_cfg}).items()},
     }
-    save_json({"summary": summary, "raw": result}, outdir / "result.json")
+    if is_main_process():
+        save_json({"summary": summary, "raw": result}, outdir / "result.json")
     return {"outdir": str(outdir), "summary": summary}
 
 def _product(grid: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
@@ -192,6 +208,9 @@ def _product(grid: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
     return combos
 
 def run_grid(grid_cfg: Dict[str, Any], overrides: List[str]) -> Dict[str, Any]:
+    if is_distributed():
+        raise RuntimeError("DDP does not support --grid mode. Please run single config with --config.")
+
     base_path = grid_cfg.get("base_config")
     if not base_path:
         raise ValueError("Grid config must include base_config")
@@ -271,9 +290,20 @@ def main():
     if args.config:
         cfg = load_json(args.config)
         cfg = apply_overrides(cfg, args.set)
-        out = run_single(cfg)
-        print("Saved to:", out["outdir"])
+        dist_ctx = setup_distributed_from_cfg(cfg)
+        cfg.setdefault("_runtime", {})
+        cfg["_runtime"]["ddp"] = dist_ctx
+        if dist_ctx.get("requested") and not dist_ctx.get("enabled") and is_main_process():
+            print("[DDP] multi_gpu=true but WORLD_SIZE=1; running single process. Use torchrun for DDP.")
+        try:
+            out = run_single(cfg)
+            if is_main_process():
+                print("Saved to:", out["outdir"])
+        finally:
+            cleanup_distributed()
     else:
+        if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+            raise SystemExit("Distributed launch with --grid is not supported. Use --config.")
         gcfg = load_json(args.grid)
         out = run_grid(gcfg, args.set)
         print("Grid done. Results:", out["results_csv"])

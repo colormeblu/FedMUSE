@@ -4,6 +4,9 @@
     "outdir": "outputs"
   },
   "seed": 42,
+  "parallel_mode": "ddp",
+  "multi_gpu": true,
+  "gpu_ids": [0,1,2,4],
   "num_workers": 4,
   "dataset": {
     "name": "domainnet",
@@ -18,7 +21,7 @@
     "name": "fedmuse",
     "rounds": 50,
     "local_epochs": 1,
-    "batch_size": 32,
+    "batch_size": 128,
     "optimizer": "adamw",
     "lr": 0.0001,
     "wd": 0.0001,

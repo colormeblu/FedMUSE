@@ -1,0 +1,55 @@
+{
+  "summary": {
+    "dataset": "domainnet",
+    "target_domain": "clipart",
+    "algorithm": "fedmuse",
+    "seed": 42,
+    "final_acc": NaN,
+    "final_acc_std": 0.0,
+    "seconds": 0.0,
+    "hp.dataset.name": "domainnet",
+    "hp.dataset.root": "/home/dengyu/dataset",
+    "hp.dataset.protocol": "loo",
+    "hp.dataset.target_domain": "clipart",
+    "hp.dataset.val_ratio": 0.1,
+    "hp.dataset.image_size": 224,
+    "hp.dataset.transforms": "clip",
+    "hp.algorithm.name": "fedmuse",
+    "hp.algorithm.rounds": 50,
+    "hp.algorithm.local_epochs": 1,
+    "hp.algorithm.batch_size": 128,
+    "hp.algorithm.optimizer": "adamw",
+    "hp.algorithm.lr": 0.0001,
+    "hp.algorithm.wd": 0.0001,
+    "hp.algorithm.prompt_len": 5,
+    "hp.algorithm.prompt_layers": 4,
+    "hp.algorithm.prompt_start_layer": null,
+    "hp.algorithm.lambda_sem": 0.5,
+    "hp.algorithm.lambda_orth": 0.1,
+    "hp.algorithm.use_semantic_hallucination": true,
+    "hp.algorithm.use_orth_loss": true,
+    "hp.algorithm.use_ua_ttaf": true,
+    "hp.algorithm.beta_uncertainty": 1.0,
+    "hp.algorithm.gamma_uncertainty": 0.0,
+    "hp.algorithm.style_mapper_hidden": 1024,
+    "hp.algorithm.router_hidden": 256,
+    "hp.algorithm.router_steps": 100,
+    "hp.algorithm.router_lr": 0.001,
+    "hp.algorithm.stat_max_batches": 192,
+    "hp.algorithm.class_template": "a photo of a {}",
+    "hp.algorithm.style_templates": [
+      "a photo in the style of {domain}",
+      "an image from {domain} domain"
+    ],
+    "hp.algorithm.log_every": 1,
+    "hp.algorithm.tqdm": true
+  },
+  "raw": {
+    "history": {
+      "round": [],
+      "test_acc": [],
+      "test_loss": []
+    },
+    "final_acc": NaN
+  }
+}

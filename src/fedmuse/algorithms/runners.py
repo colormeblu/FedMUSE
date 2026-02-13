@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -24,12 +25,138 @@ from fedmuse.algorithms.fedmuse_train import (
 from fedmuse.utils.io import save_json
 
 
+def _parse_gpu_ids(cfg: Dict[str, Any]) -> List[int]:
+    raw = cfg.get("gpu_ids", None)
+    if raw is None:
+        return []
+
+    vals: List[int]
+    if isinstance(raw, int):
+        vals = [int(raw)]
+    elif isinstance(raw, str):
+        s = raw.strip()
+        if len(s) == 0:
+            return []
+        if s.startswith("["):
+            parsed = json.loads(s)
+            if not isinstance(parsed, list):
+                raise ValueError(f"gpu_ids must be a list/int/string, got {type(parsed).__name__}")
+            vals = [int(x) for x in parsed]
+        else:
+            vals = [int(x.strip()) for x in s.split(",") if len(x.strip()) > 0]
+    elif isinstance(raw, (list, tuple)):
+        vals = [int(x) for x in raw]
+    else:
+        raise ValueError(f"gpu_ids must be a list/int/string, got {type(raw).__name__}")
+
+    out: List[int] = []
+    seen = set()
+    for gid in vals:
+        if gid < 0:
+            raise ValueError(f"gpu_ids contains invalid id: {gid}")
+        if gid not in seen:
+            out.append(gid)
+            seen.add(gid)
+    return out
+
+
+def _ddp_ctx(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    runtime = cfg.get("_runtime") if isinstance(cfg, dict) else None
+    if not isinstance(runtime, dict):
+        return {}
+    ddp = runtime.get("ddp")
+    if not isinstance(ddp, dict):
+        return {}
+    return ddp
+
+
+def _ddp_enabled(cfg: Dict[str, Any]) -> bool:
+    return bool(_ddp_ctx(cfg).get("enabled", False))
+
+
+def _ddp_rank(cfg: Dict[str, Any]) -> int:
+    return int(_ddp_ctx(cfg).get("rank", 0))
+
+
+def _ddp_world_size(cfg: Dict[str, Any]) -> int:
+    return int(_ddp_ctx(cfg).get("world_size", 1))
+
+
+def _is_main_process(cfg: Dict[str, Any]) -> bool:
+    return _ddp_rank(cfg) == 0
+
+
+def _resolve_multi_gpu_ids(cfg: Dict[str, Any]) -> List[int]:
+    if not torch.cuda.is_available():
+        return []
+    gpu_ids = _parse_gpu_ids(cfg)
+    want_multi_gpu = bool(cfg.get("multi_gpu", False))
+    if len(gpu_ids) == 0 and want_multi_gpu:
+        gpu_ids = list(range(int(torch.cuda.device_count())))
+    if len(gpu_ids) <= 1:
+        return []
+    n_gpu = int(torch.cuda.device_count())
+    bad = [gid for gid in gpu_ids if gid >= n_gpu]
+    if len(bad) > 0:
+        raise ValueError(f"gpu_ids contains unavailable CUDA ids {bad}; detected cuda device count={n_gpu}.")
+    return gpu_ids
+
+
+def _wrap_ddp(model: torch.nn.Module, cfg: Dict[str, Any], device: torch.device) -> torch.nn.Module:
+    if not _ddp_enabled(cfg):
+        return model
+    if device.type != "cuda" or device.index is None:
+        raise RuntimeError("DDP requires a CUDA device with explicit index.")
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        return model
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    model = model.to(device)
+    return DDP(
+        model,
+        device_ids=[int(device.index)],
+        output_device=int(device.index),
+        broadcast_buffers=False,
+        find_unused_parameters=False,
+    )
+
+
+def _set_loader_epoch(loader, epoch: int) -> None:
+    sampler = getattr(loader, "sampler", None)
+    if sampler is not None and hasattr(sampler, "set_epoch"):
+        sampler.set_epoch(int(epoch))
+
+
 def _device_from_cfg(cfg: Dict[str, Any]) -> torch.device:
-    dev = cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(dev)
+    if _ddp_enabled(cfg):
+        ddp = _ddp_ctx(cfg)
+        did = ddp.get("device_id", None)
+        if did is None:
+            raise RuntimeError("DDP is enabled but runtime device_id is missing.")
+        return torch.device(f"cuda:{int(did)}")
+
+    default_dev = "cuda" if torch.cuda.is_available() else "cpu"
+    dev_raw = cfg.get("device", default_dev)
+    dev = torch.device(dev_raw)
+    if dev.type == "cuda" and dev.index is None:
+        gpu_ids = _parse_gpu_ids(cfg)
+        if len(gpu_ids) > 0:
+            dev = torch.device(f"cuda:{gpu_ids[0]}")
+    return dev
 
 
-def _build_clients(domains: Dict[str, Any], target_domain: str, batch_size: int, num_workers: int):
+def _build_clients(
+    cfg: Dict[str, Any],
+    domains: Dict[str, Any],
+    target_domain: str,
+    batch_size: int,
+    num_workers: int,
+):
+    ddp_on = _ddp_enabled(cfg)
+    ddp_rank = _ddp_rank(cfg)
+    ddp_world_size = _ddp_world_size(cfg)
+    seed = int(cfg.get("seed", 0))
+
     clients = []
     for name, dd in domains.items():
         if name == target_domain:
@@ -37,7 +164,16 @@ def _build_clients(domains: Dict[str, Any], target_domain: str, batch_size: int,
         clients.append(
             {
                 "name": name,
-                "train_loader": make_loader(dd.train, batch_size=batch_size, shuffle=True, num_workers=num_workers),
+                "train_loader": make_loader(
+                    dd.train,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    num_workers=num_workers,
+                    distributed=ddp_on,
+                    rank=ddp_rank,
+                    world_size=ddp_world_size,
+                    seed=seed,
+                ),
                 "val_loader": make_loader(dd.val, batch_size=batch_size, shuffle=False, num_workers=num_workers),
                 "train_dataset": dd.train,
                 "n_train": len(dd.train),
@@ -52,6 +188,8 @@ def _save_history(outdir: Path, history: Dict[str, Any]):
 
 
 def _update_live_results(cfg: Dict[str, Any], history: Dict[str, Any], final_acc: float, seconds: float) -> None:
+    if not _is_main_process(cfg):
+        return
     runtime = cfg.get("_runtime") if isinstance(cfg, dict) else None
     if not runtime:
         return
@@ -112,7 +250,7 @@ def _build_style_texts(client_names: Sequence[str], templates: Sequence[str]) ->
 
 def _build_prompt_optimizer(
     model: PromptedOpenCLIPVision,
-    style_mapper: StyleMappingNetwork,
+    style_mapper: nn.Module,
     algo: Dict[str, Any],
 ) -> torch.optim.Optimizer:
     opt_name = str(algo.get("optimizer", "adamw")).lower().strip()
@@ -193,28 +331,40 @@ class FedAvgRunner:
         lr = float(algo.get("lr", 0.001))
         momentum = float(algo.get("momentum", 0.9))
         wd = float(algo.get("wd", 5e-4))
-        show_progress = bool(algo.get("tqdm", True))
+        show_progress = bool(algo.get("tqdm", True)) and _is_main_process(cfg)
 
         num_workers = int(cfg.get("num_workers", 4))
         device = _device_from_cfg(cfg)
+        ddp_on = _ddp_enabled(cfg)
+        parallel_gpu_ids = _resolve_multi_gpu_ids(cfg)
+        if ddp_on and _is_main_process(cfg):
+            print(f"[FedAvg] DDP enabled rank={_ddp_rank(cfg)}/{_ddp_world_size(cfg)} device={device}")
+        if (not ddp_on) and len(parallel_gpu_ids) > 1 and _is_main_process(cfg):
+            print("[FedAvg] multi_gpu=true but DDP is not initialized; using single-process training.")
         num_classes = next(iter(domains.values())).num_classes
 
-        clients, test_loader = _build_clients(domains, target, batch_size, num_workers)
+        clients, test_loader = _build_clients(cfg, domains, target, batch_size, num_workers)
         if len(clients) == 0:
             raise RuntimeError("No source clients found. Check dataset.target_domain and protocol settings.")
         global_model, _ = build_classifier_from_cfg(cfg, num_classes=num_classes, device=device, pretrained=True)
+        global_model = _wrap_ddp(global_model, cfg, device)
 
         history = {"round": [], "test_acc": [], "test_loss": []}
         t_start = time.time()
 
         for r in range(1, rounds + 1):
             updates = []
-            for c in clients:
+            for ci, c in enumerate(clients):
                 local, _ = build_classifier_from_cfg(cfg, num_classes=num_classes, device=device)
+                local = _wrap_ddp(local, cfg, device)
                 local.load_state_dict(global_model.state_dict(), strict=True)
                 opt = SGD(local.parameters(), lr=lr, momentum=momentum, weight_decay=wd)
 
                 for e in range(local_epochs):
+                    _set_loader_epoch(
+                        c["train_loader"],
+                        (r - 1) * max(1, len(clients) * local_epochs) + ci * local_epochs + e,
+                    )
                     progress = None
                     if show_progress:
                         progress = {
@@ -236,7 +386,7 @@ class FedAvgRunner:
             history["test_loss"].append(float(test_loss))
 
             _update_live_results(cfg, history, final_acc=float(test_acc), seconds=time.time() - t_start)
-            if r == 1 or r % int(algo.get("log_every", 1)) == 0:
+            if _is_main_process(cfg) and (r == 1 or r % int(algo.get("log_every", 1)) == 0):
                 print(f"[Round {r:03d}] test_acc={test_acc * 100:.2f} test_loss={test_loss:.4f}")
 
         return {"history": history, "final_acc": float(history["test_acc"][-1])}
@@ -272,12 +422,18 @@ class FedMUSERunner:
         router_steps = int(algo.get("router_steps", 100))
         router_lr = float(algo.get("router_lr", 1e-3))
         stat_max_batches = int(algo.get("stat_max_batches", -1))
-        show_progress = bool(algo.get("tqdm", True))
+        show_progress = bool(algo.get("tqdm", True)) and _is_main_process(cfg)
 
         num_workers = int(cfg.get("num_workers", 4))
         device = _device_from_cfg(cfg)
+        ddp_on = _ddp_enabled(cfg)
+        parallel_gpu_ids = _resolve_multi_gpu_ids(cfg)
+        if ddp_on and _is_main_process(cfg):
+            print(f"[FedMUSE] DDP enabled rank={_ddp_rank(cfg)}/{_ddp_world_size(cfg)} device={device}")
+        if (not ddp_on) and len(parallel_gpu_ids) > 1 and _is_main_process(cfg):
+            print("[FedMUSE] multi_gpu=true but DDP is not initialized; using single-process training.")
 
-        clients, test_loader = _build_clients(domains, target, batch_size, num_workers)
+        clients, test_loader = _build_clients(cfg, domains, target, batch_size, num_workers)
         if len(clients) == 0:
             raise RuntimeError("No source clients found. Check dataset.target_domain and protocol settings.")
 
@@ -285,26 +441,28 @@ class FedMUSERunner:
         model_name = str(open_clip_cfg.get("name", "ViT-B-16"))
         pretrained = str(open_clip_cfg.get("pretrained", "openai"))
 
-        model = PromptedOpenCLIPVision(
+        model_core = PromptedOpenCLIPVision(
             model_name=model_name,
             pretrained=pretrained,
             prompt_len=prompt_len,
             prompt_layers=prompt_layers,
             prompt_start_layer=prompt_start_layer,
         ).to(device)
-        model.freeze_backbone()
+        model_core.freeze_backbone()
+        model_train = _wrap_ddp(model_core, cfg, device)
 
         class_names = list(domains[target].class_names)
         class_template = str(algo.get("class_template", "a photo of a {}"))
         class_texts = [_template_text(class_template, c) for c in class_names]
-        class_text_features = model.encode_text(class_texts, device=device, normalize=True)
+        class_text_features = model_core.encode_text(class_texts, device=device, normalize=True)
         feature_dim = int(class_text_features.size(1))
 
-        style_mapper = StyleMappingNetwork(
+        style_mapper_core = StyleMappingNetwork(
             text_dim=feature_dim,
             feature_dim=feature_dim,
             hidden_dim=style_mapper_hidden,
         ).to(device)
+        style_mapper_train = _wrap_ddp(style_mapper_core, cfg, device)
 
         source_names = [str(c["name"]) for c in clients]
         style_templates = algo.get(
@@ -318,15 +476,15 @@ class FedMUSERunner:
             style_templates = ["a photo in the style of {domain}"]
         style_texts = _build_style_texts(source_names, [str(t) for t in style_templates])
         if bool(use_semantic_hallucination) and len(style_texts) > 0:
-            style_text_features = model.encode_text(style_texts, device=device, normalize=True)
+            style_text_features = model_core.encode_text(style_texts, device=device, normalize=True)
         else:
             style_text_features = None
 
-        logit_scale = float(algo.get("logit_scale", model.get_logit_scale()))
+        logit_scale = float(algo.get("logit_scale", model_core.get_logit_scale()))
 
-        global_prompt_state = model.global_prompt_state_dict_cpu()
-        global_style_state = style_mapper.state_dict_cpu()
-        init_local_state = model.local_prompt_state_dict_cpu()
+        global_prompt_state = model_core.global_prompt_state_dict_cpu()
+        global_style_state = style_mapper_core.state_dict_cpu()
+        init_local_state = model_core.local_prompt_state_dict_cpu()
         client_local_states: Dict[str, Dict[str, torch.Tensor]] = {
             c["name"]: {k: v.clone() for k, v in init_local_state.items()} for c in clients
         }
@@ -362,15 +520,19 @@ class FedMUSERunner:
             expert_means: List[torch.Tensor] = []
             expert_vars: List[torch.Tensor] = []
 
-            for c in clients:
+            for ci, c in enumerate(clients):
                 cname = str(c["name"])
-                model.load_global_prompt_state_dict(global_prompt_state)
-                model.load_local_prompt_state_dict(client_local_states[cname])
-                style_mapper.load_state_dict(global_style_state, strict=True)
+                model_core.load_global_prompt_state_dict(global_prompt_state)
+                model_core.load_local_prompt_state_dict(client_local_states[cname])
+                style_mapper_core.load_state_dict(global_style_state, strict=True)
 
-                opt = _build_prompt_optimizer(model, style_mapper, algo)
+                opt = _build_prompt_optimizer(model_core, style_mapper_train, algo)
                 epoch_metrics: List[Dict[str, float]] = []
                 for e in range(local_epochs):
+                    _set_loader_epoch(
+                        c["train_loader"],
+                        (r - 1) * max(1, len(clients) * local_epochs) + ci * local_epochs + e,
+                    )
                     progress = None
                     if show_progress:
                         progress = {
@@ -380,8 +542,8 @@ class FedMUSERunner:
                             "dynamic_ncols": True,
                         }
                     m = train_fedmuse_epoch(
-                        model=model,
-                        style_mapper=style_mapper,
+                        model=model_train,
+                        style_mapper=style_mapper_train,
                         loader=c["train_loader"],
                         class_text_features=class_text_features,
                         style_text_features=style_text_features,
@@ -396,14 +558,14 @@ class FedMUSERunner:
                     )
                     epoch_metrics.append(m)
 
-                global_updates.append(model.global_prompt_state_dict_cpu())
-                style_updates.append(_state_dict_cpu(style_mapper))
-                local_state = model.local_prompt_state_dict_cpu()
+                global_updates.append(model_core.global_prompt_state_dict_cpu())
+                style_updates.append(_state_dict_cpu(style_mapper_core))
+                local_state = model_core.local_prompt_state_dict_cpu()
                 client_local_states[cname] = local_state
                 client_sizes.append(int(c["n_train"]))
 
                 mu, var = collect_feature_stats(
-                    model=model,
+                    model=model_core,
                     loader=c["train_loader"],
                     device=device,
                     prompt_mode="joint",
@@ -434,12 +596,12 @@ class FedMUSERunner:
                 lr=router_lr,
             )
 
-            model.load_global_prompt_state_dict(global_prompt_state)
-            style_mapper.load_state_dict(global_style_state, strict=True)
+            model_core.load_global_prompt_state_dict(global_prompt_state)
+            style_mapper_core.load_state_dict(global_style_state, strict=True)
             global_prompt = PromptedOpenCLIPVision.effective_prompt_from_state(global_prompt_state, stream="global")
 
             test_loss, test_acc, mean_alpha = eval_fedmuse_ua_ttaf(
-                model=model,
+                model=model_core,
                 loader=test_loader,
                 class_text_features=class_text_features,
                 device=device,
@@ -472,7 +634,7 @@ class FedMUSERunner:
 
             _update_live_results(cfg, history, final_acc=float(test_acc), seconds=time.time() - t_start)
 
-            if r == 1 or r % int(algo.get("log_every", 1)) == 0:
+            if _is_main_process(cfg) and (r == 1 or r % int(algo.get("log_every", 1)) == 0):
                 print(
                     f"[Round {r:03d}] test_acc={test_acc * 100:.2f} test_loss={test_loss:.4f} "
                     f"total={round_total:.4f} ce={round_ce:.4f} sem={round_sem:.4f} "

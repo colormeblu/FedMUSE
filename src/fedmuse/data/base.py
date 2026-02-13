@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Subset, DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from PIL import Image, ImageOps
 
 @dataclass
@@ -111,5 +112,33 @@ def get_transforms(name: str = "default", image_size: int = 224):
         return clip_transforms(image_size=image_size)
     return default_transforms(image_size=image_size)
 
-def make_loader(ds: Dataset, batch_size: int, shuffle: bool, num_workers: int = 4) -> DataLoader:
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True)
+def make_loader(
+    ds: Dataset,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int = 4,
+    distributed: bool = False,
+    rank: int = 0,
+    world_size: int = 1,
+    seed: int = 0,
+    drop_last: bool = False,
+) -> DataLoader:
+    sampler = None
+    if distributed and int(world_size) > 1:
+        sampler = DistributedSampler(
+            ds,
+            num_replicas=int(world_size),
+            rank=int(rank),
+            shuffle=bool(shuffle),
+            seed=int(seed),
+            drop_last=bool(drop_last),
+        )
+    return DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=bool(shuffle) if sampler is None else False,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=bool(drop_last),
+    )

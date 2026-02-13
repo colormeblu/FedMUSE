@@ -26,6 +26,52 @@ def _progress_iter(loader: DataLoader, progress: Optional[Dict[str, Any]]):
     return pbar, pbar
 
 
+def _model_core(model):
+    if isinstance(model, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)):
+        return model.module
+    return model
+
+
+def _model_encode_image(
+    model,
+    x: torch.Tensor,
+    prompt_mode: str,
+    normalize: bool = True,
+    external_prompt: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    # DataParallel scatters Tensor kwargs by dim=0, which breaks shared prompts
+    # shaped as [L, P, D]. Use core model directly when external prompt is given.
+    if isinstance(model, torch.nn.DataParallel):
+        if external_prompt is not None:
+            core = _model_core(model)
+            return core.encode_image(
+                x,
+                prompt_mode=prompt_mode,
+                normalize=normalize,
+                external_prompt=external_prompt,
+            )
+        # Use keyword x for safer argument binding under DataParallel.
+        return model(
+            x=x,
+            prompt_mode=prompt_mode,
+            normalize=normalize,
+            external_prompt=None,
+        )
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        return model(
+            x=x,
+            prompt_mode=prompt_mode,
+            normalize=normalize,
+            external_prompt=external_prompt,
+        )
+    return model.encode_image(
+        x,
+        prompt_mode=prompt_mode,
+        normalize=normalize,
+        external_prompt=external_prompt,
+    )
+
+
 def clip_classification_logits(
     image_features: torch.Tensor,
     class_text_features: torch.Tensor,
@@ -176,7 +222,8 @@ def train_fedmuse_epoch(
     use_orth_loss: bool = True,
     progress: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, float]:
-    model.prompt.train()
+    core = _model_core(model)
+    core.prompt.train()
     style_mapper.train()
 
     ce_meter = AverageMeter()
@@ -190,7 +237,7 @@ def train_fedmuse_epoch(
         x = x.to(device)
         y = y.to(device)
 
-        feat = model.encode_image(x, prompt_mode="joint", normalize=False)
+        feat = _model_encode_image(model, x, prompt_mode="joint", normalize=False)
         feat_n = F.normalize(feat, dim=-1)
         logits = clip_classification_logits(feat_n, class_text_features, logit_scale=logit_scale)
         ce = F.cross_entropy(logits, y)
@@ -208,7 +255,7 @@ def train_fedmuse_epoch(
             sem = torch.zeros((), device=device, dtype=ce.dtype)
 
         if bool(use_orth_loss) and float(lambda_orth) > 0.0:
-            orth = orthogonal_disentanglement_loss(model.global_prompt_tensor(), model.local_prompt_tensor())
+            orth = orthogonal_disentanglement_loss(core.global_prompt_tensor(), core.local_prompt_tensor())
         else:
             orth = torch.zeros((), device=device, dtype=ce.dtype)
 
@@ -246,13 +293,14 @@ def collect_feature_stats(
     max_batches: int = -1,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Collect diagonal Gaussian stats for Mahalanobis matching."""
-    model.prompt.eval()
+    core = _model_core(model)
+    core.prompt.eval()
     feats = []
     for batch_idx, (x, _) in enumerate(loader):
         if int(max_batches) > 0 and batch_idx >= int(max_batches):
             break
         x = x.to(device)
-        f = model.encode_image(x, prompt_mode=prompt_mode, normalize=False).float()
+        f = _model_encode_image(model, x, prompt_mode=prompt_mode, normalize=False).float()
         feats.append(f.detach().cpu())
 
     if len(feats) == 0:
@@ -314,7 +362,8 @@ def eval_fedmuse_ua_ttaf(
     router: Optional[nn.Module] = None,
     use_ua_ttaf: bool = True,
 ) -> Tuple[float, float, float]:
-    model.prompt.eval()
+    core = _model_core(model)
+    core.prompt.eval()
     if router is not None:
         router.eval()
 
@@ -340,7 +389,7 @@ def eval_fedmuse_ua_ttaf(
             xi = x[i : i + 1]
             yi = y[i : i + 1]
 
-            feat_g_raw = model.encode_image(xi, prompt_mode="global_only", normalize=False)
+            feat_g_raw = _model_encode_image(model, xi, prompt_mode="global_only", normalize=False)
             feat_g = F.normalize(feat_g_raw, dim=-1)
             logits_g = clip_classification_logits(feat_g, class_text_features, logit_scale=logit_scale)
 
@@ -372,7 +421,8 @@ def eval_fedmuse_ua_ttaf(
                 else:
                     final_prompt = global_prompt
 
-            feat_f = model.encode_image(
+            feat_f = _model_encode_image(
+                model,
                 xi,
                 prompt_mode="none",
                 normalize=True,

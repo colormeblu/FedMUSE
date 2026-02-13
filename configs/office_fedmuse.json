@@ -4,6 +4,9 @@
     "outdir": "outputs"
   },
   "seed": 42,
+  "parallel_mode": "ddp",
+  "multi_gpu": false,
+  "gpu_ids": [],
   "num_workers": 4,
   "dataset": {
     "name": "office-home",

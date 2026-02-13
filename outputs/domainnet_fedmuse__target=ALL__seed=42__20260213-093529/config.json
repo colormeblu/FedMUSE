@@ -4,6 +4,13 @@
     "outdir": "outputs"
   },
   "seed": 42,
+  "multi_gpu": true,
+  "gpu_ids": [
+    0,
+    1,
+    2,
+    4
+  ],
   "num_workers": 4,
   "dataset": {
     "name": "domainnet",
@@ -16,13 +23,13 @@
   },
   "algorithm": {
     "name": "fedmuse",
-    "rounds": 100,
+    "rounds": 50,
     "local_epochs": 1,
-    "batch_size": 32,
+    "batch_size": 128,
     "optimizer": "adamw",
     "lr": 0.0001,
     "wd": 0.0001,
-    "prompt_len": 4,
+    "prompt_len": 5,
     "prompt_layers": 4,
     "prompt_start_layer": null,
     "lambda_sem": 0.5,
