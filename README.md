@@ -1,6 +1,6 @@
 # Fed-MUSE
 
-`Fed-MUSE` is a runnable Python project for the algorithm in `/home/dengyu/Fed-MUSE.docx`, with the same scaffold style as `FedSVP`:
+`Fed-MUSE`(Federated Multi-modal Uncertainty-aware Style Experts) is a runnable Python project for the algorithm in `/home/dengyu/Fed-MUSE.docx`, with the same scaffold style as `FedSVP`:
 
 - `train.py`
 - `configs/*.json`
